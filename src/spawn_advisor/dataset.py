@@ -58,6 +58,7 @@ def build_rows(path: Path) -> list[dict]:
             "tank_id": int(tank_id),
             "player_name": vehicle["name"],
             "vehicle_type": vehicle["vehicleType"],
+            "team": vehicle["team"],
             "is_bot": vehicle["name"].startswith(":"),
             "is_recorder": vehicle["name"] == header["playerName"],
             "won": vehicle["team"] == winner_team,
