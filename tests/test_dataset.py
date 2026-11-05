@@ -38,3 +38,17 @@ def test_same_battle(rows):
     assert len({r["arena_id"] for r in rows}) == 1
     assert all(r["map_name"] == "06_ensk" for r in rows)
     assert all(r["client_version"] == "2.4.1.0" for r in rows)
+    
+FIXTURE_240 = Path("tests/fixtures/westfeld_240.wotreplay")
+
+
+def test_version_240():
+    rows = build_rows(FIXTURE_240)
+    assert len(rows) == 15
+    assert all(r["client_version"] == "2.4.0.0" for r in rows)
+    assert all(r["x"] is not None for r in rows)
+
+    friend = next(r for r in rows if r["is_recorder"])
+    assert friend["vehicle_type"] == "japan:J41_Type_68"
+    assert friend["damage"] == 4173
+    assert friend["won"] is True

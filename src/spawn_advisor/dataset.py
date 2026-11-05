@@ -1,3 +1,4 @@
+import pandas as pd
 from pathlib import Path
 
 from spawn_advisor.replay.battle import find_battle_start, position_at
@@ -52,6 +53,8 @@ def build_rows(path: Path) -> list[dict]:
             "arena_id": arena_id,
             "client_version": client_version,
             "map_name": map_name,
+            "battle_type": header["battleType"],
+            "gameplay_id": header["gameplayID"],
             "tank_id": int(tank_id),
             "player_name": vehicle["name"],
             "vehicle_type": vehicle["vehicleType"],
@@ -70,3 +73,38 @@ def build_rows(path: Path) -> list[dict]:
 
     return rows
     
+def build_dataset(raw_dir: Path) -> pd.DataFrame:
+    """Строки по всем реплеям в raw_dir и её подпапках, без дубликатов."""
+    paths = sorted(raw_dir.rglob("*.wotreplay"))
+    print("найдено файлов:", len(paths))
+    all_rows = []
+    for i, path in enumerate(paths, start=1):
+        if i % 50 == 0:
+            print(f"{i}/{len(paths)}")
+        try:
+            rows = build_rows(path)
+        except Exception as error:
+            print(f"пропущен {path.name}: {error}")
+            continue
+        if not rows:
+            print(f"пропущен {path.name}: нет результатов или старта боя")
+            continue
+        for row in rows:
+            row["source"] = path.parent.name
+            row["file"] = path.name
+        all_rows.extend(rows)
+    df = pd.DataFrame(all_rows)
+    before = len(df)
+    df = df.drop_duplicates(subset=["arena_id", "tank_id"])
+    print(f"строк: {len(df)}, убрано дубликатов: {before - len(df)}")
+    return df
+    
+if __name__ == "__main__":
+    df = build_dataset(Path("data/raw"))
+    print(df.shape)
+    print(df["map_name"].value_counts().head(10))
+
+    output = Path("data/processed/dataset.parquet")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(output, index=False)
+    print("сохранено:", output)
