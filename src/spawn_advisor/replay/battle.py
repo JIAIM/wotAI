@@ -53,15 +53,3 @@ def position_at(positions: list[Position], entity_id: int, time: float) -> Posit
         result = position
     return result
     
-if __name__ == "__main__":
-    from pathlib import Path
-    from spawn_advisor.replay.packets import read_temp_replay
-
-    packets = read_temp_replay(Path("tests/fixtures/temp.wotreplay"))
-    print(find_battle_start(packets))
-    
-    from spawn_advisor.replay.positions import extract_positions
-
-    start = find_battle_start(packets)
-    positions = extract_positions(packets)
-    print(position_at(positions, 9227663, start + 90))
