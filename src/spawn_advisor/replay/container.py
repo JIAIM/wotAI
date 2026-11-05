@@ -30,6 +30,4 @@ def read_replay_file(path: Path) -> ReplayFile:
     
     return ReplayFile(header = blocks[0], results = blocks[1] if len(blocks)>1 else None, encrypted = data[offset:])
     
-if __name__ == "__main__":
-       replay = read_replay_file(Path("tests/fixtures/ensk_final.wotreplay"))
        
