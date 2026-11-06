@@ -76,6 +76,8 @@ def build_rows(path: Path) -> list[dict]:
     
 def build_dataset(raw_dir: Path) -> pd.DataFrame:
     """Строки по всем реплеям в raw_dir и её подпапках, без дубликатов."""
+    skipped = []
+    
     paths = sorted(raw_dir.rglob("*.wotreplay"))
     print("найдено файлов:", len(paths))
     all_rows = []
@@ -85,10 +87,10 @@ def build_dataset(raw_dir: Path) -> pd.DataFrame:
         try:
             rows = build_rows(path)
         except Exception as error:
-            print(f"пропущен {path.name}: {error}")
+            skipped.append({"file": path.name, "source": path.parent.name, "reason": str(error)})
             continue
         if not rows:
-            print(f"пропущен {path.name}: нет результатов или старта боя")
+            skipped.append({"file": path.name, "source": path.parent.name, "reason": "нет результатов или старта боя"})
             continue
         for row in rows:
             row["source"] = path.parent.name
@@ -97,6 +99,10 @@ def build_dataset(raw_dir: Path) -> pd.DataFrame:
     df = pd.DataFrame(all_rows)
     before = len(df)
     df = df.drop_duplicates(subset=["arena_id", "tank_id"])
+    output_dir = Path("data/processed")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(skipped).to_csv(output_dir / "skipped.csv", index=False)
+    print("пропущено файлов:", len(skipped))
     print(f"строк: {len(df)}, убрано дубликатов: {before - len(df)}")
     return df
     

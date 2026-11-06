@@ -25,17 +25,29 @@ def find_battle_start(packets: list[Packet]) -> float | None:
     for packet in packets:
         if packet.type != METHOD_CALL_PACKET_TYPE:
             continue
-        method_id, = struct.unpack('<I', packet.payload[4:8])         
-        if method_id != ARENA_METHOD_ID:
+
+        # БЫЛО: распаковка method_id и проверка «!= ARENA_METHOD_ID» — удалить обе строки.
+        # СТАЛО: проверка длины, как в детекторе:
+        if len(packet.payload) < 15:
             continue
-        if packet.payload[12] != PERIOD_SUB_ID :               
+
+        if packet.payload[12] != PERIOD_SUB_ID:
             continue
-        compressed = packet.payload[14:]
-        raw = zlib.decompress(compressed)
-        period_info = SafeUnpickler(io.BytesIO(raw)).load()
-        
-        if period_info[0] == BATTLE_PERIOD:
-            return packet.time     
+
+        # БЫЛО: разжатие и распаковка без защиты.
+        # СТАЛО: то же самое внутри try, потому что теперь сюда доходят
+        # пакеты любых методов, и многие из них не zlib и не pickle:
+        try:
+            raw = zlib.decompress(packet.payload[14:])
+            period_info = SafeUnpickler(io.BytesIO(raw)).load()
+        except Exception:
+            continue
+
+        # БЫЛО: if period_info[0] == BATTLE_PERIOD
+        # СТАЛО: строже — проверяем форму кортежа целиком:
+        if isinstance(period_info, tuple) and len(period_info) == 4 and period_info[0] == BATTLE_PERIOD:
+            return packet.time
+
     return None
             
 

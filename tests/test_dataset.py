@@ -52,3 +52,13 @@ def test_version_240():
     assert friend["vehicle_type"] == "japan:J41_Type_68"
     assert friend["damage"] == 4173
     assert friend["won"] is True
+    
+FIXTURE_231 = Path("tests/fixtures/desert_231.wotreplay")
+
+
+def test_version_231():
+    rows = build_rows(FIXTURE_231)
+    assert len(rows) == 15
+    assert all(r["client_version"] == "2.3.1.0" for r in rows)
+    assert all(r["x"] is not None for r in rows)
+    assert all(-600 < r["x"] < 600 and -600 < r["z"] < 600 for r in rows)
