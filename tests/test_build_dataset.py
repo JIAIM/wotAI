@@ -17,12 +17,14 @@ def test_build_dataset(tmp_path):
     shutil.copy(FIXTURES / "westfeld_240.wotreplay", tmp_path / "friend")
     shutil.copy(FIXTURES / "ensk_final.wotreplay", tmp_path / "friend" / "copy.wotreplay")
 
-    df = build_dataset(tmp_path, tmp_path / "cache")
+    df, roster = build_dataset(tmp_path, tmp_path / "cache")
 
     assert len(df) == 30                       # 15 + 15, дубликат убран
     assert df["arena_id"].nunique() == 2
     assert (df["map_name"] == "06_ensk").sum() == 15          # Энск ровно один раз, а не дважды
     assert set(df.loc[df["map_name"] == "23_westfeld", "source"]) == {"friend"}
+    assert len(roster) == 60                    # 2 боя × 30 танков
+    assert set(roster["team"]) == {1, 2}
     
 def test_cache(tmp_path):
     raw = tmp_path / "raw" / "mine"
@@ -31,8 +33,8 @@ def test_cache(tmp_path):
     shutil.copy(FIXTURES / "temp.wotreplay", raw)
     cache = tmp_path / "cache"
 
-    first = build_dataset(tmp_path / "raw", cache)
+    first, _ = build_dataset(tmp_path / "raw", cache)
     assert len(list(cache.glob("*.json"))) == 2     # кэш и для хорошего, и для пропущенного файла
 
-    second = build_dataset(tmp_path / "raw", cache)
+    second, _ = build_dataset(tmp_path / "raw", cache)
     assert len(second) == len(first) == 15

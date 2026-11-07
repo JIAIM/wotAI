@@ -10,7 +10,7 @@ from spawn_advisor.replay.packets import read_packets
 from spawn_advisor.replay.positions import extract_positions
 
 SNAPSHOT_SECONDS = 90
-PARSER_VERSION = "v1"   
+PARSER_VERSION = "v2"
 
 
 def build_rows(path: Path) -> list[dict]:
@@ -78,19 +78,37 @@ def build_rows(path: Path) -> list[dict]:
     return rows
 
 
+def build_roster(path: Path) -> list[dict]:
+    """Состав боя: по строке на каждый танк обеих команд."""
+    replay = read_replay_file(path)
+    if replay.results is None:
+        return []
+    arena_id = replay.results[0]["arenaUniqueID"]
+    return [
+        {
+            "arena_id": arena_id,
+            "team": vehicle["team"],
+            "tank_id": int(tank_id),
+            "vehicle_type": vehicle["vehicleType"],
+            "is_bot": vehicle["name"].startswith(":"),
+        }
+        for tank_id, vehicle in replay.header["vehicles"].items()
+    ]
+
 def process_replay(path: Path) -> dict:
     """Обрабатывает один реплей.
 
-    Возвращает {"rows": [...], "reason": None}, если всё получилось,
-    или {"rows": [], "reason": "почему пропущен"}.
+    Возвращает {"rows": [...], "roster": [...], "reason": None}, если всё получилось,
+    или {"rows": [], "roster": [], "reason": "почему пропущен"}.
     """
     try:
         rows = build_rows(path)
+        roster = build_roster(path) if rows else []
     except Exception as error:
-        return {"rows": [], "reason": str(error)}
+        return {"rows": [], "roster": [], "reason": str(error)}
     if not rows:
-        return {"rows": [], "reason": "нет результатов или старта боя"}
-    return {"rows": rows, "reason": None}
+        return {"rows": [], "roster": [], "reason": "нет результатов или старта боя"}
+    return {"rows": rows, "roster": roster, "reason": None}
 
 
 def load_or_process(path: Path, cache_dir: Path) -> dict:
@@ -107,16 +125,13 @@ def load_or_process(path: Path, cache_dir: Path) -> dict:
     return result
 
 
-def build_dataset(raw_dir: Path, cache_dir: Path) -> pd.DataFrame:
-    """Строки по всем реплеям в raw_dir и её подпапках, без дубликатов.
-
-    Каждый реплей обрабатывается один раз: результат хранится в cache_dir.
-    Пропущенные файлы с причинами сохраняются в data/processed/skipped.csv.
-    """
+def build_dataset(raw_dir: Path, cache_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Датасет союзников и составы боёв по всем реплеям в raw_dir, без дубликатов."""
     paths = sorted(raw_dir.rglob("*.wotreplay"))
     print("найдено файлов:", len(paths))
 
     all_rows = []
+    all_roster = []
     skipped = []
     for i, path in enumerate(paths, start=1):
         if i % 200 == 0:
@@ -132,10 +147,12 @@ def build_dataset(raw_dir: Path, cache_dir: Path) -> pd.DataFrame:
             row["source"] = path.parent.name
             row["file"] = path.name
         all_rows.extend(rows)
+        all_roster.extend(result["roster"])
 
     df = pd.DataFrame(all_rows)
     before = len(df)
     df = df.drop_duplicates(subset=["arena_id", "tank_id"])
+    roster = pd.DataFrame(all_roster).drop_duplicates(subset=["arena_id", "tank_id"])
 
     output_dir = Path("data/processed")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -143,15 +160,16 @@ def build_dataset(raw_dir: Path, cache_dir: Path) -> pd.DataFrame:
 
     print("пропущено файлов:", len(skipped))
     print(f"строк: {len(df)}, убрано дубликатов: {before - len(df)}")
-    return df
+    print(f"составов: {roster['arena_id'].nunique()} боёв, {len(roster)} танков")
+    return df, roster
 
 
 if __name__ == "__main__":
-    df = build_dataset(Path("data/raw"), Path("data/interim") / f"parser_{PARSER_VERSION}")
+    df, roster = build_dataset(Path("data/raw"), Path("data/interim") / f"parser_{PARSER_VERSION}")
     print(df.shape)
-    print(df["map_name"].value_counts().head(10))
 
-    output = Path("data/processed/dataset.parquet")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(output, index=False)
-    print("сохранено:", output)
+    output_dir = Path("data/processed")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(output_dir / "dataset.parquet", index=False)
+    roster.to_parquet(output_dir / "roster.parquet", index=False)
+    print("сохранено: dataset.parquet, roster.parquet")
