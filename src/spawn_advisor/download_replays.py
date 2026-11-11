@@ -2,10 +2,10 @@ import os
 import requests
 import time
 
-start_id = 446651
-count = 5000
+start_id = 447525
+count = 800
 # Обновленный путь к нужной папке
-save_dir = r"K:\pet-projects\wotAI\data\raw\web"
+save_dir = r"K:\pet-projects\wotAI\data\raw\web_test"
 
 # Убедимся, что все вложенные папки существуют (создаст всю цепочку, если ее нет)
 if not os.path.exists(save_dir):
