@@ -1,14 +1,53 @@
 import re
+import os
+import time
 from pathlib import Path
 
 import pandas as pd
+import matplotlib.pyplot as plt   
 
 from spawn_advisor.replay.packets import Packet
 from spawn_advisor.replay.positions import extract_positions
 
 MAP_PACKET_TYPE = 15
 EARLY_SECONDS = 10
+POLL_SECONDS = 2
+COLORS = {1: "darkviolet", 2: "turquoise", 3: "limegreen"}   # к константам в начале файла
 
+
+def watch(replays_dir: Path, features: pd.DataFrame, recs: pd.DataFrame, output: Path) -> None:
+    """Следит за temp.wotreplay и показывает совет один раз на каждый новый бой."""
+    centers = team_centers(features)
+    temp = replays_dir / "temp.wotreplay"
+    done_battle = None   # время создания temp-файла, для которого совет уже показан
+
+    print(f"Слежу за {temp}. Остановить — Ctrl+C.")
+    while True:
+        time.sleep(POLL_SECONDS)
+        if not temp.exists():
+            continue
+        battle = temp.stat().st_ctime
+        if battle == done_battle:
+            continue
+
+        try:
+            packets = read_temp_replay(temp)
+        except (OSError, ValueError):
+            continue        # игра как раз пишет файл — попробуем через 2 секунды
+        map_name = read_map_name(packets)
+        if map_name is None:
+            continue
+        team = detect_team(packets, map_name, centers)
+        if team is None:
+            continue
+
+        if recs[(recs["map_name"] == map_name) & (recs["team"] == team)].empty:
+            print(f"{map_name}, сторона {team}: для этой карты пока мало данных")
+        else:
+            plot_advice(features, recs, map_name, team, output)
+            print(f"{map_name}, сторона {team}: совет готов")
+            os.startfile(output)     # открыть картинку программой по умолчанию (Windows)
+        done_battle = battle
 
 def read_map_name(packets: list[Packet]) -> str | None:
     """Название карты из пакета типа 15: 'spaces/05_prohorovka' → '05_prohorovka'."""
@@ -41,34 +80,37 @@ def detect_team(packets: list[Packet], map_name: str, centers: pd.DataFrame) -> 
     distances = ((map_centers["x"] - cx) ** 2 + (map_centers["z"] - cz) ** 2) ** 0.5
     return int(map_centers.loc[distances.idxmin(), "team"])
 
+def plot_advice(features: pd.DataFrame, recs: pd.DataFrame, map_name: str, team: int, output: Path) -> None:
+    """Силуэт карты из всех позиций + 3 советуемые точки. Сохраняет PNG."""
+    background = features[features["map_name"] == map_name]
+    advice = recs[(recs["map_name"] == map_name) & (recs["team"] == team)]
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    ax.scatter(background["x"], background["z"], s=2, c="lightgray", alpha=0.4)
+
+    for _, zone in advice.iterrows():
+        ax.scatter(zone["center_x"], zone["center_z"], s=600, c=COLORS[zone["rank"]], alpha=0.85, edgecolors="black")
+        ax.text(zone["center_x"], zone["center_z"], str(zone["rank"]),
+                ha="center", va="center", fontsize=16, fontweight="bold", color="white")
+        ax.text(zone["center_x"] + 40, zone["center_z"] + 40,
+                f"×{zone['score']:.2f} ({zone['count']} танков)", fontsize=9)
+
+    ax.set_xlim(-500, 500)
+    ax.set_ylim(-500, 500)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(f"{map_name}, сторона {team}: куда ехать к 90-й секунде")
+    fig.savefig(output, dpi=100, bbox_inches="tight")
+    plt.close(fig)
+
 if __name__ == "__main__":
-    import random
-    from spawn_advisor.replay.container import read_replay_file
-    from spawn_advisor.replay.crypto import decrypt_packet_stream
-    from spawn_advisor.replay.packets import read_packets
+    import sys
+    from spawn_advisor.replay.packets import read_temp_replay
 
-    features = pd.read_parquet("data/processed/features.parquet")
-    centers = team_centers(features)
+    processed = Path("data/processed")
+    features = pd.read_parquet(processed / "features.parquet")
+    recs = pd.read_parquet(processed / "recommendations.parquet")
 
-    paths = sorted(Path("data/raw").rglob("*.wotreplay"))
-    random.seed(0)
-    sample = random.sample(paths, 200)
-
-    correct = total = 0
-    for path in sample:
-        try:
-            replay = read_replay_file(path)
-        except ValueError:
-            continue
-        if replay.results is None or replay.header.get("gameplayID") != "ctf":
-            continue
-        header = replay.header
-        true_team = next(v["team"] for v in header["vehicles"].values() if v["name"] == header["playerName"])
-        packets = read_packets(decrypt_packet_stream(replay.encrypted))
-        map_name = read_map_name(packets)
-        guess = detect_team(packets, map_name, centers)
-        if guess is None:
-            continue
-        total += 1
-        correct += guess == true_team
-    print(f"сторона угадана: {correct} из {total} ({correct / total:.1%})")
+    replays_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(r"C:\Games\World_of_Tanks_EU\replays")
+    watch(replays_dir, features, recs, Path("advice.png"))
