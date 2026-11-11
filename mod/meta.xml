@@ -1,0 +1,6 @@
+<root>
+    <id>spawn_advisor</id>
+    <version>0.3.2</version>
+    <name>Spawn Advisor</name>
+    <description>Top-3 starting positions on the minimap (experimental)</description>
+</root>
