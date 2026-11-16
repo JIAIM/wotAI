@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Spawn Advisor 0.3.2 — топ-3 стартовые позиции на миникарте.
+"""Spawn Advisor 1.0.0 — топ-3 стартовые позиции на миникарте.
 
-Советы рисуются как пронумерованные точки (1, 2, 3) — тем же способом,
-каким клиент рисует точки захвата: addEntry + invoke(setPointNumber) + invoke(setState). Каждый шаг в try/except:
-если в этой версии клиента что-то устроено иначе, мод ничего не ломает,
-а пишет в python.log, что не нашлось, и список модулей миникарты.
+Советы рисуются цветными векторными кольцами — тем же механизмом, которым
+клиент рисует круги обзора и отрисовки вокруг своего танка
+(значок VIEW_RANGE_CIRCLES + команды as_addDrawRange и т.п.).
+Цвет — число 0xRRGGBB, радиус — в метрах игрового мира.
+Ранг 1 — фиолетовый, 2 — бирюзовый, 3 — зелёный.
+
+Каждый шаг в try/except: если что-то устроено иначе, мод ничего не ломает,
+а пишет в game.log, что не получилось.
 
 Код совместим с Python 2.7 (клиент WoT) и использует print() как функцию.
 """
@@ -12,26 +16,29 @@ from __future__ import print_function
 
 import sys
 
-VERSION = '0.3.2'
-DEBUG = False          # True — писать в лог список модулей миникарты и значков
-MARKER_SCALE = 0.5     # размер точки относительно стандартного значка точки захвата
-GALLERY = True         # True — вместо советов нарисовать 12 разных значков сеткой (для выбора внешнего вида)
-TOGGLE_KEY = 'KEY_F9'  # клавиша вкл/выкл точек (имя из модуля Keys клиента)
+VERSION = '1.0.0'
+DEBUG = False          # True — писать в лог список модулей миникарты
+TOGGLE_KEY = 'KEY_F9'  # клавиша вкл/выкл меток (имя из модуля Keys клиента)
+SHOW_FOR_ARTY = False  # арте советы не помогают (lift 0,98), поэтому по умолчанию не показываем
 
-# Галерея: значок → место на сетке 4 × 3 (слева направо, сверху вниз), номера 1–12
-GALLERY_SYMBOLS = ['ARTY_HIT_DOT_MARKER', 'ARTY_MARKER', 'ARTILLERY_ENTRY', 'ARTILLERY_YELLOW_ENTRY',
-                   'ATTENTION_MARKER', 'DEAD_POINT', 'VIEW_POINT', 'MARK_POSITION',
-                   'NAVIGATION_POINT_MARKER', 'SHOOTING_POINT_MARKER', 'FLAG_POINT_MARKER', 'DISCOVERED_ITEM_MARKER']
-GALLERY_X = [-300.0, -100.0, 100.0, 300.0]
-GALLERY_Z = [300.0, 0.0, -300.0]
+# Цвета рангов 1, 2, 3 (0xRRGGBB): фиолетовый, бирюзовый, зелёный
+RANK_COLORS = [0x9400D3, 0x40E0D0, 0x32CD32]
+ALPHA = 100            # непрозрачность колец; у клиентских кругов 50
+
+# Каждая метка — несколько концентрических колец (команда, радиус в метрах).
+# У одного значка VIEW_RANGE_CIRCLES каждая команда рисует одно своё кольцо,
+# поэтому берём разные команды — получается «толстая» точка.
+RINGS = [
+    ('as_addDrawRange', 30.0),
+    ('as_addMaxViewRage', 22.0),
+    ('as_addMinSpottingRange', 14.0),
+]
+
 PREFIX = '[SpawnAdvisor]'
 
 # Заполняется скриптом сборки из recommendations.parquet:
 # {"07_lakeville": {"1": [[x, z], ...], "2": [[x, z], ...]}, ...}
 ADVICE = {}
-
-SYMBOL_CANDIDATES = ['CONTROL_POINT', 'ALLY_TEAM_SPAWN']
-CONTAINER_CANDIDATES = ['TEAM_POINTS', 'ICONS']
 
 _state = {'minimap': None, 'entries': [], 'visible': True}
 
@@ -74,42 +81,6 @@ def install_minimap_hook():
         log('minimap hook error: %r' % (error,))
 
 
-def pick_symbol_and_container():
-    from gui.Scaleform.daapi.view.battle.shared.minimap import settings
-    symbols = settings.ENTRY_SYMBOL_NAME
-    containers = settings.CONTAINER_NAME
-    if DEBUG:
-        log('available symbols: %s' % ', '.join(a for a in dir(symbols) if not a.startswith('_')))
-        log('available containers: %s' % ', '.join(a for a in dir(containers) if not a.startswith('_')))
-    symbol = next((getattr(symbols, n) for n in SYMBOL_CANDIDATES if hasattr(symbols, n)), None)
-    container = next((getattr(containers, n) for n in CONTAINER_CANDIDATES if hasattr(containers, n)), None)
-    return symbol, container
-
-
-def draw_gallery(minimap):
-    """Рисует по одному значку каждого вида на сетке 4 × 3 и пишет в лог, какой где."""
-    import Math
-    from gui.Scaleform.daapi.view.battle.shared.minimap import settings
-    symbols = settings.ENTRY_SYMBOL_NAME
-    container = settings.CONTAINER_NAME.EQUIPMENTS
-    for index, name in enumerate(GALLERY_SYMBOLS):
-        row, col = divmod(index, len(GALLERY_X))
-        x, z = GALLERY_X[col], GALLERY_Z[row]
-        if not hasattr(symbols, name):
-            log('gallery %2d %-24s нет в этой версии' % (index + 1, name))
-            continue
-        try:
-            matrix = Math.Matrix()
-            matrix.setTranslate(Math.Vector3(x, 0.0, z))
-            entry_id = minimap.addEntry(getattr(symbols, name), container, matrix=matrix, active=True)
-            if entry_id:
-                _state['entries'].append(entry_id)
-            log('gallery %2d %-24s ряд %d, колонка %d (x=%.0f, z=%.0f): entry %r' % (
-                index + 1, name, row + 1, col + 1, x, z, entry_id))
-        except Exception as error:
-            log('gallery %2d %-24s ошибка %r' % (index + 1, name, error))
-
-
 def add_markers(map_name, team, attempt=0):
     import BigWorld
     minimap = _state['minimap']
@@ -120,46 +91,48 @@ def add_markers(map_name, team, attempt=0):
             log('minimap was not captured in 15 s')
         return
 
-    if GALLERY:
-        draw_gallery(minimap)
-        return
-
     points = ADVICE.get(map_name, {}).get(str(team), [])
     if not points:
         log('no advice for %s team %s' % (map_name, team))
         return
 
     try:
-        import Math
-        from gui.Scaleform.genConsts.BATTLE_MINIMAP_CONSTS import BATTLE_MINIMAP_CONSTS as consts
-        from gui.Scaleform.daapi.view.battle.shared.minimap import settings
-        from gui.battle_control import minimap_utils
-        symbol, container = pick_symbol_and_container()
-        log('using symbol=%r container=%r' % (symbol, container))
-        if symbol is None or container is None:
-            log('component methods: %s' % ', '.join(a for a in dir(minimap) if 'ntry' in a))
-            return
-        for rank, (x, z) in enumerate(points, start=1):
-            # как клиент делает для своих статичных меток: позиция + масштаб в одной матрице,
-            # и флаг FULL, чтобы миникарта применила к значку и масштаб тоже
-            matrix = minimap_utils.makePositionAndScaleMatrix(
-                Math.Vector3(float(x), 0.0, float(z)), (MARKER_SCALE, 1.0, MARKER_SCALE))
-            entry_id = minimap.addEntry(symbol, container, matrix=matrix, active=True,
-                                        transformProps=settings.TRANSFORM_FLAG.FULL)
-            if not entry_id:
-                log('marker %d: addEntry returned %r' % (rank, entry_id))
-                continue
-            # как клиент делает для точек захвата: номер точки и обычное состояние
-            _state['entries'].append(entry_id)
-            minimap.invoke(entry_id, consts.SET_POINT_NUMBER, rank)
-            minimap.invoke(entry_id, consts.SET_STATE, consts.STATE_DEFAULT)
-            log('marker %d at (%.0f, %.0f): entry %r' % (rank, x, z, entry_id))
+        bottom_left, upper_right = minimap.getBoundingBox()
+        width = upper_right[0] - bottom_left[0]
+        height = upper_right[1] - bottom_left[1]
+        log('arena size %.0f x %.0f' % (width, height))
     except Exception as error:
-        log('add_markers error: %r' % (error,))
+        log('getBoundingBox error: %r' % (error,))
+        return
+
+    for rank, (x, z) in enumerate(points, start=1):
         try:
-            log('component methods: %s' % ', '.join(a for a in dir(minimap) if 'ntry' in a))
-        except Exception:
-            pass
+            draw_ring_marker(minimap, rank, float(x), float(z), width, height)
+        except Exception as error:
+            log('marker %d error: %r' % (rank, error))
+
+
+def draw_ring_marker(minimap, rank, x, z, width, height):
+    """Одна метка: значок кругов обзора в точке (x, z) + несколько цветных колец."""
+    import Math
+    from gui.Scaleform.daapi.view.battle.shared.minimap import settings
+    matrix = Math.Matrix()
+    matrix.setTranslate(Math.Vector3(x, 0.0, z))
+    # как клиент для своих кругов: без поворота, чтобы кольца не крутились с картой
+    props = settings.TRANSFORM_FLAG.DEFAULT ^ settings.TRANSFORM_FLAG.NO_ROTATION
+    entry_id = minimap.addEntry(settings.ENTRY_SYMBOL_NAME.VIEW_RANGE_CIRCLES,
+                                settings.CONTAINER_NAME.PERSONAL,
+                                matrix=matrix, active=True, transformProps=props)
+    if not entry_id:
+        log('marker %d: addEntry returned %r' % (rank, entry_id))
+        return
+    _state['entries'].append(entry_id)
+    # размер арены нужен Flash, чтобы перевести метры в пиксели миникарты
+    minimap.invoke(entry_id, settings.VIEW_RANGE_CIRCLES_AS3_DESCR.AS_INIT_ARENA_SIZE, width, height)
+    color = RANK_COLORS[(rank - 1) % len(RANK_COLORS)]
+    for command, radius in RINGS:
+        minimap.invoke(entry_id, command, color, ALPHA, radius)
+    log('marker %d at (%.0f, %.0f): entry %r color %06X' % (rank, x, z, entry_id, color))
 
 
 def set_markers_visible(visible):
@@ -189,6 +162,18 @@ def on_key_down(event):
         log('on_key_down error: %r' % (error,))
 
 
+def player_is_arty(player):
+    """True, если игрок на арте (тег SPG у машины). При любой ошибке — False: лучше показать, чем молча скрыть."""
+    try:
+        tags = player.vehicleTypeDescriptor.type.tags
+    except Exception:
+        try:
+            tags = player.arena.vehicles[player.playerVehicleID]['vehicleType'].type.tags
+        except Exception:
+            return False
+    return 'SPG' in tags
+
+
 def on_avatar_ready():
     try:
         import BigWorld
@@ -199,6 +184,9 @@ def on_avatar_ready():
         team = player.team
         log('battle: map=%s team=%s advice=%d points' % (
             map_name, team, len(ADVICE.get(map_name, {}).get(str(team), []))))
+        if not SHOW_FOR_ARTY and player_is_arty(player):
+            log('arty: advice hidden')
+            return
         BigWorld.callback(2.0, lambda: add_markers(map_name, team))
         if DEBUG:
             BigWorld.callback(5.0, dump_minimap_api)

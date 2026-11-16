@@ -8,3 +8,5 @@ __pycache__/
 .env
 dist/
 build/
+*.egg-info/
+mod/__pycache__/

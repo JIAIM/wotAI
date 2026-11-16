@@ -1,8 +1,20 @@
 [project]
 name = "spawn-advisor"
-version = "0.1.0"
+version = "1.0.0"
+description = "World of Tanks: top-3 starting positions on the minimap, learned from replays"
 requires-python = ">=3.11"
-dependencies = ["pycryptodome", "pandas", "pyarrow"]
+dependencies = [
+    "pycryptodome",
+    "pandas",
+    "pyarrow",
+    "numpy",
+    "requests",
+    "python-dotenv",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "scikit-learn", "jupyter"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
