@@ -2,6 +2,8 @@
 
 ![tests](https://github.com/JIAIM/wotAI/actions/workflows/tests.yml/badge.svg)
 
+**English** · [Українська](README.uk.md)
+
 An in-game mod for **World of Tanks** that marks the **top-3 starting positions** on the minimap at the start of a battle: where to be ~90 seconds in, for the current map and spawn side. The advice is learned from ~4,000 parsed battle replays.
 
 Built by hand as a learning / portfolio project: from a binary replay parser to evaluation and a working client mod.
